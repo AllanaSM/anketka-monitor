@@ -1,16 +1,14 @@
-"""Entry point. Each Railway service runs its own block, chosen by the service name."""
+"""Entry point for the Anketka collector and Telegram bot."""
 import os
 import sys
 
-from bot.main import main as bot
-from collector.main import main as collector
-from web.main import main as web
-from worker.main import main as worker
+from collector.rustore import main as collector
+from bot.anketka import main as bot
 
-BLOCKS = {"web": web, "collector": collector, "worker": worker, "bot": bot}
+BLOCKS = {"collector": collector, "bot": lambda _argv: bot()}
 
 if __name__ == "__main__":
     name = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("RAILWAY_SERVICE_NAME", "")
     if name not in BLOCKS:
         sys.exit(f"unknown block '{name}', expected one of: {', '.join(BLOCKS)}")
-    BLOCKS[name]()
+    sys.exit(BLOCKS[name](sys.argv[2:]))

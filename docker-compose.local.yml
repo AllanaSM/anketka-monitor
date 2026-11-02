@@ -1,0 +1,18 @@
+# Temporary PostgreSQL for migration checks.
+# Data is kept in tmpfs and disappears when the container is removed.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: anketka
+      POSTGRES_PASSWORD: anketka_local_dev
+      POSTGRES_DB: anketka_monitor
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U anketka -d anketka_monitor"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
