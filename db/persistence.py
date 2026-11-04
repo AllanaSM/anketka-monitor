@@ -167,6 +167,84 @@ def persist_records(records, summary, snapshot_path, database_url=None, requeste
     return {"run_id": run_id, **counters}
 
 
+def persist_faq_records(records, summary, snapshot_path, database_url=None,
+                        requested_from="2026-01-01", mode="backfill",
+                        collector_version="faq-0.1"):
+    """Import an FAQ JSON snapshot and create a version only when its text changed."""
+    database_url = database_url or os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is required for PostgreSQL persistence")
+    run_key = uuid4()
+    counters = {"faq_items_seen": len(records), "faq_items_new": 0, "faq_items_updated": 0,
+                "faq_item_versions": 0}
+    diagnostics = {"collector_summary": summary, "snapshot_path": str(snapshot_path)}
+    with psycopg.connect(database_url) as conn:
+        with conn.transaction():
+            source_row = conn.execute(
+                "SELECT s.id FROM sources s JOIN projects p ON p.id=s.project_id "
+                "WHERE p.code='anketka' AND s.platform='faq' AND s.external_key='anketka.faq'"
+            ).fetchone()
+            if not source_row:
+                raise RuntimeError("FAQ source is missing; run the database migrations first")
+            source_id = source_row[0]
+            run_id = conn.execute(
+                "INSERT INTO collection_runs(source_id,run_key,mode,status,requested_from,collector_version,snapshot_path) "
+                "VALUES (%s,%s,%s,'running',%s,%s,%s) RETURNING id",
+                (source_id, run_key, mode, requested_from, collector_version, str(snapshot_path)),
+            ).fetchone()[0]
+            try:
+                for record in records:
+                    external_key = record["external_key"]
+                    observed = dt(record["collected_at"])
+                    row = conn.execute(
+                        "SELECT id FROM faq_items WHERE source_id=%s AND external_key=%s",
+                        (source_id, external_key),
+                    ).fetchone()
+                    if row:
+                        faq_item_id = row[0]
+                        conn.execute(
+                            "UPDATE faq_items SET question=%s,url=%s,last_seen_at=%s,last_seen_run_id=%s,enabled=TRUE WHERE id=%s",
+                            (record["question"], record["source_url"], observed, run_id, faq_item_id),
+                        )
+                    else:
+                        faq_item_id = conn.execute(
+                            "INSERT INTO faq_items(source_id,external_key,question,url,first_seen_at,last_seen_at,first_seen_run_id,last_seen_run_id) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                            (source_id, external_key, record["question"], record["source_url"], observed, observed, run_id, run_id),
+                        ).fetchone()[0]
+                        counters["faq_items_new"] += 1
+
+                    previous = conn.execute(
+                        "SELECT content_hash FROM faq_item_versions WHERE faq_item_id=%s ORDER BY version_no DESC LIMIT 1",
+                        (faq_item_id,),
+                    ).fetchone()
+                    if not previous or previous[0] != record["content_hash"]:
+                        version_no = conn.execute(
+                            "SELECT COALESCE(MAX(version_no),0)+1 FROM faq_item_versions WHERE faq_item_id=%s",
+                            (faq_item_id,),
+                        ).fetchone()[0]
+                        conn.execute(
+                            "INSERT INTO faq_item_versions(faq_item_id,version_no,run_id,observed_at,question,answer,content_hash,raw_payload) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                            (faq_item_id, version_no, run_id, observed, record["question"], record["answer"],
+                             record["content_hash"], Jsonb(record)),
+                        )
+                        counters["faq_item_versions"] += 1
+                        if previous:
+                            counters["faq_items_updated"] += 1
+                conn.execute(
+                    "UPDATE collection_runs SET status=%s,finished_at=%s,counters=%s,diagnostics=%s WHERE id=%s",
+                    (summary.get("status", "complete"), datetime.now(timezone.utc), Jsonb(counters), Jsonb(diagnostics), run_id),
+                )
+            except Exception:
+                conn.execute(
+                    "UPDATE collection_runs SET status='failed',finished_at=%s,counters=%s,diagnostics=%s WHERE id=%s",
+                    (datetime.now(timezone.utc), Jsonb(counters), Jsonb(diagnostics), run_id),
+                )
+                raise
+    return {"run_id": run_id, **counters}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="Path to reviews.json")
