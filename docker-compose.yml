@@ -22,6 +22,7 @@ services:
       DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-anketka}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/anketka_monitor
       TELEGRAM_TOKEN: ${TELEGRAM_TOKEN:?Set TELEGRAM_TOKEN}
       FAQ_ADMIN_CHAT_IDS: ${FAQ_ADMIN_CHAT_IDS:-}
+      MINI_APP_URL: ${MINI_APP_URL:-}
       PORT: 8080
     depends_on:
       postgres:
@@ -35,6 +36,16 @@ services:
       DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-anketka}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/anketka_monitor
       TELEGRAM_TOKEN: ${TELEGRAM_TOKEN:-}
       FAQ_ADMIN_CHAT_IDS: ${FAQ_ADMIN_CHAT_IDS:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build: .
+    environment:
+      BLOCK: web
+      DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-anketka}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/anketka_monitor
+      PORT: 8080
     depends_on:
       postgres:
         condition: service_healthy

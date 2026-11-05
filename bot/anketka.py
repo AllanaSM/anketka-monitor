@@ -31,6 +31,15 @@ def admin_chat_ids():
     return result
 
 
+def mini_app_url():
+    url = setting("MINI_APP_URL")
+    if not url:
+        return ""
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    return url.rstrip("/") + "/"
+
+
 def telegram(method, payload=None):
     token = setting("TELEGRAM_TOKEN")
     if not token:
@@ -177,6 +186,11 @@ def configure_commands():
         {"command": "faq_changes", "description": "изменения FAQ (админ)"},
     ]
     telegram("setMyCommands", {"commands": public_commands})
+    url = mini_app_url()
+    if url:
+        telegram("setChatMenuButton", {
+            "menu_button": {"type": "web_app", "text": "Лента", "web_app": {"url": url}}
+        })
     for chat_id in sorted(admin_chat_ids()):
         telegram("setMyCommands", {
             "scope": {"type": "chat", "chat_id": chat_id},

@@ -6,6 +6,7 @@ from collector.rustore import main as collector
 from collector.faq import main as faq
 from bot.anketka import main as bot
 from bot.anketka import send_faq_report
+from web.main import main as web
 
 def faq_report(_argv):
     count = send_faq_report()
@@ -13,7 +14,7 @@ def faq_report(_argv):
     return 0
 
 
-BLOCKS = {"collector": collector, "faq": faq, "faq-report": faq_report, "bot": lambda _argv: bot()}
+BLOCKS = {"collector": collector, "faq": faq, "faq-report": faq_report, "bot": lambda _argv: bot(), "web": web}
 
 if __name__ == "__main__":
     name = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("RAILWAY_SERVICE_NAME", "")

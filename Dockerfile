@@ -1,5 +1,5 @@
-# Recipe used to package the collector and Telegram bot.
-# The block is selected by the BLOCK variable (bot or collector).
+# Recipe used to package the collector, Telegram bot and read-only web feed.
+# The block is selected by the BLOCK variable (bot, collector or web).
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1

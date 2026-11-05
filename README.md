@@ -23,7 +23,8 @@ FAQ Анкетки → collector/faq.py → JSON-снимок
 - `db/migrations/` — версионированная схема PostgreSQL проекта Анкетки.
 - `db/migrate.py` — применение миграций с проверкой контрольных сумм.
 - `db/persistence.py` — идемпотентная запись JSON-снимка в PostgreSQL.
-- `bot/anketka.py` — Telegram-команды `/start`, `/status` и доставка новых событий.
+- `bot/anketka.py` — Telegram-команды, доставка новых событий и кнопка Mini App «Лента».
+- `web/main.py` и `web/template.html` — read-only лента последних отзывов RuStore.
 - `data/rustore/` — локальные JSON-снимки; каталог исключён из Git.
 - `docker-compose.local.yml` — отдельная временная PostgreSQL для тестов.
 - `docs/database-schema.html` — описание таблиц и связей.
@@ -106,6 +107,8 @@ python main.py faq && python main.py faq-report
 ```
 
 Команда `faq-report` отправляет результат только администраторам из `FAQ_ADMIN_CHAT_IDS` и не использует таблицу обычных подписок.
+
+Для Mini App задайте `MINI_APP_URL` — публичный HTTPS-адрес сервиса `web`. При старте бот добавляет кнопку «Лента» в меню Telegram. Сервис `web` не изменяет данные и показывает последние версии отзывов RuStore, фильтры по периоду, оценке и поисковой строке, а также ответы Анкетки.
 
 Production-база хранится в постоянном Docker-томе с резервным копированием. Локальная база из `anketka-db-test` к production не подключается.
 
