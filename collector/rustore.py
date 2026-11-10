@@ -142,11 +142,13 @@ def normalize(item, collected_at):
               "developer_response_at": item.get("devResponseDate"),
               "likes": item.get("likesCount"), "dislikes": item.get("dislikesCount"),
               "replies": replies, "replies_count": item["totalRepliesCount"]}
-    # Reactions and collection time must not turn into a text-change event.
-    content = {k: result[k] for k in ("text", "rating", "author", "developer_response", "developer_response_at")}
-    content["replies"] = [{k: r.get(k) for k in ("id", "text", "user", "userType", "commentDate")}
-                          for r in sorted(replies, key=lambda r: r["id"])]
-    result["content_hash"] = hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    # Only the review's own fields define a review version. Replies, the
+    # developer response, reactions and collection time belong to separate
+    # observation/event streams and must not create review_updated.
+    content = {k: result[k] for k in ("text", "rating", "author", "published_at", "edited_at")}
+    result["review_content_hash"] = hashlib.sha256(
+        json.dumps(content, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
     return result
 
 

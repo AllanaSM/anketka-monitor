@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -30,8 +31,26 @@ def _reply_kind(reply):
     return "developer" if "dev" in value or "moder" in value else "user"
 
 
+def _review_content_hash(record):
+    """Return the review-only hash, accepting pre-A1 snapshots during rollout."""
+    value = record.get("review_content_hash")
+    if value is None:
+        value = record.get("content_hash")
+    if not value:
+        raise ValueError("Review snapshot has no review_content_hash")
+    return value
+
+
+def _reply_content_hash(reply, author_name):
+    content = {"text": reply.get("text") or "", "author": author_name,
+               "published_at": reply.get("commentDate")}
+    return hashlib.sha256(
+        json.dumps(content, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
 def persist_records(records, summary, snapshot_path, database_url=None, requested_from=None,
-                    mode="backfill", collector_version="rustore-0.1"):
+                    mode="backfill", collector_version="rustore-0.2"):
     """Import records in one transaction and return inserted/updated counters."""
     database_url = database_url or os.environ.get("DATABASE_URL")
     if not database_url:
@@ -86,7 +105,8 @@ def persist_records(records, summary, snapshot_path, database_url=None, requeste
                         "SELECT id,content_hash FROM review_versions WHERE review_id=%s ORDER BY version_no DESC LIMIT 1",
                         (review_id,),
                     ).fetchone()
-                    if not previous or previous[1] != record["content_hash"]:
+                    review_hash = _review_content_hash(record)
+                    if not previous or previous[1] != review_hash:
                         version_no = conn.execute(
                             "SELECT COALESCE(MAX(version_no),0)+1 FROM review_versions WHERE review_id=%s", (review_id,)
                         ).fetchone()[0]
@@ -94,7 +114,7 @@ def persist_records(records, summary, snapshot_path, database_url=None, requeste
                             "INSERT INTO review_versions(review_id,version_no,run_id,observed_at,author_name,text,rating,published_at,source_edited_at,content_hash,raw_payload) "
                             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
                             (review_id, version_no, run_id, observed, record.get("author"), record["text"], record["rating"],
-                             dt(record.get("published_at")), dt(record.get("edited_at")), record["content_hash"], Jsonb(record)),
+                             dt(record.get("published_at")), dt(record.get("edited_at")), review_hash, Jsonb(record)),
                         ).fetchone()[0]
                         event_type = "review_new" if not previous else "review_updated"
                         conn.execute(
@@ -116,10 +136,7 @@ def persist_records(records, summary, snapshot_path, database_url=None, requeste
                         if reply_key == "developer-response":
                             reply_key = "developer-response"
                         reply_text = reply.get("text") or ""
-                        reply_hash = __import__("hashlib").sha256(
-                            json.dumps({"text": reply_text, "author": author_name, "published_at": reply.get("commentDate")},
-                                       ensure_ascii=False, sort_keys=True).encode("utf-8")
-                        ).hexdigest()
+                        reply_hash = _reply_content_hash(reply, author_name)
                         row = conn.execute(
                             "SELECT id FROM replies WHERE review_id=%s AND external_key=%s", (review_id, reply_key)
                         ).fetchone()
