@@ -7,6 +7,8 @@ from pathlib import Path
 
 import psycopg
 
+from db.preflight import verify_identity
+
 MIGRATIONS = Path(__file__).with_name("migrations")
 LOCK_KEY = 874_221_031
 
@@ -27,6 +29,7 @@ def main() -> int:
     if not files:
         raise SystemExit(f"No migration files found in {MIGRATIONS}")
     with psycopg.connect(database_url) as conn:
+        verify_identity(conn, database_url)
         conn.execute("SELECT pg_advisory_lock(%s)", (LOCK_KEY,))
         try:
             conn.execute("""

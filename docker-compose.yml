@@ -40,6 +40,26 @@ services:
       postgres:
         condition: service_healthy
 
+  analytics:
+    build: .
+    environment:
+      BLOCK: analytics
+      DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-anketka}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/anketka_monitor
+      ANALYTICS_ENABLED: ${ANALYTICS_ENABLED:-false}
+      ANALYTICS_DRY_RUN: ${ANALYTICS_DRY_RUN:-false}
+      ANALYTICS_INTERVAL_SECONDS: ${ANALYTICS_INTERVAL_SECONDS:-300}
+      ANALYTICS_MAX_RUNS_PER_TICK: ${ANALYTICS_MAX_RUNS_PER_TICK:-1}
+      ANALYTICS_PROVIDER: ${ANALYTICS_PROVIDER:-unknown}
+      ANALYTICS_ENDPOINT: ${ANALYTICS_ENDPOINT:-}
+      ANALYTICS_API_KEY: ${ANALYTICS_API_KEY:-}
+      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-}
+      ANALYTICS_TIMEOUT: ${ANALYTICS_TIMEOUT:-30}
+      ANALYTICS_ATTEMPTS: ${ANALYTICS_ATTEMPTS:-3}
+      ANALYTICS_PROMPT_VERSION: ${ANALYTICS_PROMPT_VERSION:-v1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   web:
     build: .
     expose:

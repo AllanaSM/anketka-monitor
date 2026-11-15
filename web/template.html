@@ -53,6 +53,14 @@
     .version { color: var(--ink-soft); font: 10px "Courier New", monospace; }
     .open { padding: 7px 10px; color: #fff; border: 0; border-radius: 8px; background: var(--ink); font-size: 12px; text-decoration: none; }
     .empty { padding: 52px 12px; text-align: center; color: var(--ink-soft); }
+    .admin-panel { margin-top: 18px; padding: 17px; border: 1px solid var(--ink); border-radius: var(--radius); background: #e8f0d2; }
+    .admin-panel h2 { margin: 0; font: 700 26px/1 Georgia, serif; }
+    .admin-meta { margin: 8px 0 16px; color: var(--ink-soft); font: 11px "Courier New", monospace; }
+    .analytics-list { display: grid; gap: 8px; margin-top: 10px; }
+    .analytics-row { padding: 10px 11px; border: 1px solid #c9d2b3; border-radius: 11px; background: #f8fbef; }
+    .analytics-row strong { display: block; }
+    .analytics-row small { color: var(--ink-soft); }
+    .analytics-label { margin: 18px 0 6px; color: var(--ink-soft); font: 10px "Courier New", monospace; letter-spacing: .1em; text-transform: uppercase; }
     .foot { margin-top: 22px; color: var(--ink-soft); text-align: center; font: 10px "Courier New", monospace; letter-spacing: .08em; text-transform: uppercase; }
     @media (min-width: 680px) { .shell { padding-left: 30px; padding-right: 30px; } .hero, .toolbar { margin-left: -30px; margin-right: -30px; padding-left: 30px; padding-right: 30px; } }
   </style>
@@ -68,6 +76,16 @@
       <input id="search" class="search" type="search" placeholder="Найти по тексту или имени…" autocomplete="off">
       <div class="chips" id="periods"></div>
       <div class="chips" id="ratings"></div>
+    </section>
+    <section id="analyticsPanel" class="admin-panel" hidden aria-live="polite">
+      <h2>Аналитика отзывов</h2>
+      <p id="analyticsMeta" class="admin-meta"></p>
+      <div class="analytics-label">Боли</div>
+      <div id="analyticsPains" class="analytics-list"></div>
+      <div class="analytics-label">Отзывы</div>
+      <div id="analyticsReviews" class="analytics-list"></div>
+      <div class="analytics-label">Кандидаты в словарь</div>
+      <div id="analyticsCandidates" class="analytics-list"></div>
     </section>
     <section id="feed" class="feed" aria-live="polite"></section>
     <p class="foot">RuStore · Анкетка · только чтение</p>
@@ -108,6 +126,27 @@
     });
     document.querySelector("#search").addEventListener("input", (e) => { state.query = e.target.value.trim(); render(); });
     render();
+    async function loadAnalytics() {
+      if (!tg || !tg.initData) return;
+      try {
+        const response = await fetch("/api/analytics", {
+          method: "POST",
+          headers: { "X-Telegram-Init-Data": tg.initData },
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!data.available) return;
+        const run = data.selected_run;
+        document.querySelector("#analyticsPanel").hidden = false;
+        document.querySelector("#analyticsMeta").textContent = `run #${run.id} · ${run.mode} · FAQ #${run.faq_collection_run_id} · отзывов ${run.analyzed_review_count}`;
+        document.querySelector("#analyticsPains").innerHTML = data.pains.length ? data.pains.map((p) => `<div class="analytics-row"><strong>${esc(p.label)}</strong><small>${esc(p.area_label)} · ${p.pain_review_count} отзывов · ${p.share_percent}% · ${esc(p.status)}</small></div>`).join("") : '<div class="empty">Болей пока нет.</div>';
+        document.querySelector("#analyticsReviews").innerHTML = data.reviews.length ? data.reviews.map((r) => `<div class="analytics-row"><strong>${esc(r.author)} · ${r.rating} ★ · ${esc(r.tone)}</strong><small>${esc(r.summary)}${r.needs_review ? " · нужна проверка" : ""}</small></div>`).join("") : '<div class="empty">Результатов по отзывам пока нет.</div>';
+        document.querySelector("#analyticsCandidates").innerHTML = data.candidates.length ? data.candidates.map((p) => `<div class="analytics-row"><strong>#${p.id} · ${esc(p.label)}</strong><small>${esc(p.area_label)} · кандидат</small></div>`).join("") : '<div class="empty">Новых кандидатов нет.</div>';
+      } catch (_error) {
+        // The public feed remains available when the protected admin section fails.
+      }
+    }
+    loadAnalytics();
   </script>
 </body>
 </html>

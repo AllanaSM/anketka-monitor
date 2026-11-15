@@ -10,9 +10,11 @@ import urllib.request
 from datetime import datetime, timezone
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 API = "https://api.telegram.org"
 MAX_MESSAGE = 3900
+RUSTORE_URL = "https://www.rustore.ru/catalog/app/ru.anketka/reviews"
 
 
 def setting(name):
@@ -184,6 +186,10 @@ def configure_commands():
         {"command": "faq_status", "description": "статус FAQ (админ)"},
         {"command": "faq_latest", "description": "текущий FAQ (админ)"},
         {"command": "faq_changes", "description": "изменения FAQ (админ)"},
+        {"command": "analytics_retro", "description": "ретроспектива отзывов (админ)"},
+        {"command": "pain_approve", "description": "утвердить боль (админ)"},
+        {"command": "pain_merge", "description": "объединить боль (админ)"},
+        {"command": "pain_reject", "description": "отклонить боль (админ)"},
     ]
     telegram("setMyCommands", {"commands": public_commands})
     url = mini_app_url()
@@ -198,11 +204,89 @@ def configure_commands():
         })
 
 
+def approve_candidate(conn, candidate_id, chat_id):
+    row = conn.execute(
+        "UPDATE pain_dictionary SET status='approved',approved_by_chat_id=%s,approved_at=now(),updated_at=now() "
+        "WHERE id=%s AND project_id=(SELECT id FROM projects WHERE code='anketka') AND status='candidate' "
+        "RETURNING id",
+        (chat_id, candidate_id),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def merge_candidate(conn, candidate_id, pain_id, chat_id):
+    row = conn.execute(
+        "UPDATE pain_dictionary candidate SET status='rejected',updated_at=now(),"
+        "metadata=candidate.metadata || %s "
+        "WHERE candidate.id=%s AND candidate.project_id=(SELECT id FROM projects WHERE code='anketka') "
+        "AND candidate.status='candidate' AND EXISTS ("
+        "SELECT 1 FROM pain_dictionary target WHERE target.id=%s "
+        "AND target.project_id=candidate.project_id AND target.status='approved') "
+        "RETURNING candidate.id",
+        (Jsonb({"merged_into_pain_id": pain_id, "merged_by_chat_id": chat_id}), candidate_id, pain_id),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def reject_candidate(conn, candidate_id, chat_id):
+    row = conn.execute(
+        "UPDATE pain_dictionary SET status='rejected',updated_at=now(),"
+        "metadata=metadata || %s "
+        "WHERE id=%s AND project_id=(SELECT id FROM projects WHERE code='anketka') AND status='candidate' "
+        "RETURNING id",
+        (Jsonb({"rejected_by_chat_id": chat_id}), candidate_id),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def analytics_admin_text(conn, chat_id, text):
+    """Handle one analytics admin command, returning a safe user-facing message."""
+    if chat_id not in admin_chat_ids():
+        return None
+    parts = text.split()
+    command = parts[0].split("@", 1)[0] if parts else ""
+    if command == "/analytics_retro":
+        if len(parts) != 1:
+            return "Использование: /analytics_retro"
+        from analytics.client import StructuredAnalyticsClient
+        from analytics.worker import _bool_setting, run_retrospective
+        project = conn.execute("SELECT id FROM projects WHERE code='anketka'").fetchone()
+        if not project:
+            return "Проект Anketka не найден."
+        result = run_retrospective(
+            conn,
+            StructuredAnalyticsClient.from_env(),
+            project_id=project[0],
+            requested_by_chat_id=chat_id,
+            dry_run=_bool_setting("ANALYTICS_DRY_RUN"),
+            model_provider=setting("ANALYTICS_PROVIDER") or "unknown",
+        )
+        label = "dry-run выполнен" if not result["persisted"] else f"run #{result['analysis_run_id']} сохранён"
+        return f"Ретроспектива: {label}. Отзывов: {result['input_count']}. FAQ run: {result['faq_collection_run_id']}."
+    if command == "/pain_approve":
+        if len(parts) != 2 or not parts[1].isdigit():
+            return "Использование: /pain_approve <candidate_id>"
+        value = approve_candidate(conn, int(parts[1]), chat_id)
+        return f"Кандидат #{value} утверждён." if value else "Кандидат не найден или уже обработан."
+    if command == "/pain_merge":
+        if len(parts) != 3 or not all(value.isdigit() for value in parts[1:]):
+            return "Использование: /pain_merge <candidate_id> <pain_id>"
+        value = merge_candidate(conn, int(parts[1]), int(parts[2]), chat_id)
+        return f"Кандидат #{value} объединён." if value else "Кандидат или целевая боль не найдены."
+    if command == "/pain_reject":
+        if len(parts) != 2 or not parts[1].isdigit():
+            return "Использование: /pain_reject <candidate_id>"
+        value = reject_candidate(conn, int(parts[1]), chat_id)
+        return f"Кандидат #{value} отклонён." if value else "Кандидат не найден или уже обработан."
+    return None
+
+
 def handle_update(conn, update):
     message = update.get("message") or {}
     chat = message.get("chat") or {}
     chat_id = chat.get("id")
     text = (message.get("text") or "").strip()
+    command = text.split()[0].split("@", 1)[0] if text else ""
     if chat_id is None:
         return
     if text.startswith("/start"):
@@ -210,15 +294,22 @@ def handle_update(conn, update):
         send_message(chat_id, "Бот мониторинга Анкетки подключён. Новые отзывы RuStore будут приходить сюда.")
     elif text.startswith("/status"):
         send_message(chat_id, status_text(conn))
-    elif text.startswith("/faq_status"):
+    elif command == "/faq_status":
         if chat_id in admin_chat_ids():
             send_message(chat_id, faq_status_text(conn))
-    elif text.startswith("/faq_latest"):
+    elif command == "/faq_latest":
         if chat_id in admin_chat_ids():
             send_message(chat_id, faq_latest_text(conn))
-    elif text.startswith("/faq_changes"):
+    elif command == "/faq_changes":
         if chat_id in admin_chat_ids():
             send_message(chat_id, faq_changes_text(conn))
+    elif command in {"/analytics_retro", "/pain_approve", "/pain_merge", "/pain_reject"}:
+        try:
+            response = analytics_admin_text(conn, chat_id, text)
+        except Exception as error:
+            response = f"Ошибка аналитики: {html.escape(str(error)[:500])}" if chat_id in admin_chat_ids() else None
+        if response:
+            send_message(chat_id, response)
 
 
 def _event_text(rows):
@@ -229,10 +320,11 @@ def _event_text(rows):
         lines.append(
             f"\n<b>{label}</b> · оценка {rating} · {html.escape(author or 'без имени')}\n"
             f"{html.escape(str(published or ''))}\n"
-            f"{html.escape(text)}\n<a href=\"{html.escape(url)}\">Открыть в RuStore</a>"
+            f"{html.escape(str(text)[:500])}"
         )
         if response:
-            lines.append(f"Ответ разработчика: {html.escape(response)}")
+            lines.append(f"Ответ разработчика: {html.escape(str(response)[:350])}")
+    lines.append(f"\n<a href=\"{RUSTORE_URL}\">Открыть отзывы в RuStore</a>")
     return "\n".join(lines)
 
 
