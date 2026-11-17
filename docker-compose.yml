@@ -23,6 +23,12 @@ services:
       TELEGRAM_TOKEN: ${TELEGRAM_TOKEN:?Set TELEGRAM_TOKEN}
       FAQ_ADMIN_CHAT_IDS: ${FAQ_ADMIN_CHAT_IDS:-}
       MINI_APP_URL: ${MINI_APP_URL:-}
+      ANALYTICS_ENDPOINT: ${ANALYTICS_ENDPOINT:-http://analytics_adapter:8090/analyze}
+      ANALYTICS_API_KEY: ${ANALYTICS_API_KEY:-}
+      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-}
+      ANALYTICS_DRY_RUN: ${ANALYTICS_DRY_RUN:-false}
+      ANALYTICS_PROVIDER: ${ANALYTICS_PROVIDER:-unknown}
+      ANALYTICS_PROMPT_VERSION: ${ANALYTICS_PROMPT_VERSION:-v4}
       PORT: 8080
     depends_on:
       postgres:
@@ -59,6 +65,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  analytics_adapter:
+    build: .
+    command: ["python", "-m", "analytics_adapter"]
+    environment:
+      ADAPTER_HOST: 0.0.0.0
+      ADAPTER_PORT: 8090
+      ANALYTICS_API_KEY: ${ANALYTICS_API_KEY:-}
+      ANALYTICS_MODEL: ${ANALYTICS_MODEL:-}
+      OPENROUTER_ENDPOINT: ${OPENROUTER_ENDPOINT:-https://openrouter.ai/api/v1/chat/completions}
+    expose:
+      - "8090"
 
   web:
     build: .
